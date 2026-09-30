@@ -13,7 +13,7 @@ WORKDIR /build
 # sentinel-core is a private repo: the token comes from a BuildKit secret and never lands in a layer.
 RUN --mount=type=secret,id=gh_token \
     git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/" \
-    && pip install "sentinel-core @ git+https://github.com/API-Sentinel-Team/api-sentinel-core.git@v0.2.0" \
+    && pip install "sentinel-core @ git+https://github.com/API-Sentinel-Team/api-sentinel-core.git@v0.3.0" \
     ; rc=$?; git config --global --unset-all url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadof || true; exit $rc
 
 COPY pyproject.toml ./

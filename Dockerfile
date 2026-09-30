@@ -1,26 +1,36 @@
-# Dedicated scheduler process: APScheduler plus periodic processors
-# (recon scheduler, continuous testing, OpenAPI drift).
-FROM python:3.11-slim
+# syntax=docker/dockerfile:1.7
+# Build (sentinel-core is private; pass a token as a BuildKit secret):
+#   DOCKER_BUILDKIT=1 docker build --secret id=gh_token,env=GH_TOKEN -t api-sentinel-scheduler .
+ARG PYTHON_VERSION=3.11
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential gcc git libpq-dev \
     && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+WORKDIR /build
+# sentinel-core is a private repo: the token comes from a BuildKit secret and never lands in a layer.
+RUN --mount=type=secret,id=gh_token \
+    git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/" \
+    && pip install "sentinel-core @ git+https://github.com/API-Sentinel-Team/api-sentinel-core.git@v0.1.0" \
+    ; rc=$?; git config --global --unset-all url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadof || true; exit $rc
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml ./
+COPY sentinel_scheduler/ ./sentinel_scheduler/
+RUN pip install --no-deps .
 
-COPY alembic.ini ./
-COPY migrations/ ./migrations/
-COPY server/ ./server/
-
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
-
-CMD ["python", "-m", "server.services.scheduler_service"]
+FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
+LABEL org.opencontainers.image.title="api-sentinel-scheduler" \
+      org.opencontainers.image.source="https://github.com/API-Sentinel-Team/api-sentinel-scheduler"
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libpq5 tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 appsentinel \
+    && useradd --system --uid 10001 --gid appsentinel --home-dir /app --shell /usr/sbin/nologin appsentinel
+WORKDIR /app
+COPY --from=builder /opt/venv /opt/venv
+RUN mkdir -p /app/data/archives /app/models && chown -R appsentinel:appsentinel /app
+USER appsentinel
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "sentinel_scheduler.services.scheduler_service"]

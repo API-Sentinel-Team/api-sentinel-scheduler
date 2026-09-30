@@ -1,21 +1,33 @@
 # api-sentinel-scheduler
 
-Dedicated scheduling process: APScheduler, persisted-schedule sync, and the
-periodic recon / continuous-testing / OpenAPI-drift processors.
+Runs the cron scheduler for saved scan schedules plus the recon, continuous-testing and OpenAPI-drift loops. It only **enqueues** runs; the scan-worker executes them.
 
-## Status: vendored build, decoupling pending
+Part of API Sentinel. This repo contains **only this service's code**; everything shared
+(database models, migrations, config, tenancy, audit, redaction, pentest policy, scan planning,
+the security-test template library) lives in
+[`api-sentinel-core`](https://github.com/API-Sentinel-Team/api-sentinel-core), installed as the
+`sentinel-core` dependency and pinned to a released tag in `pyproject.toml`.
 
-The scheduler currently shares models and configuration with the API runtime
-(vendored under `server/`). It starts and syncs today, but becoming an
-independent microservice requires extracting the shared-contracts package
-first (tracked as the next stage).
+## Boundaries
+
+- Never import another service's package. Services cooperate only through the database run
+  queue and Redis pub/sub. `tests/unit/test_service_boundaries.py` enforces this in the
+  api repo; the same rule holds here.
+- Schema changes are made in `api-sentinel-core` (the single owner of migrations), never here.
 
 ## Run
 
 ```bash
-docker build -t api-sentinel/scheduler:local .
-docker run --rm api-sentinel/scheduler:local
+python -m sentinel_scheduler.services.scheduler_service
 ```
 
-Entry point: `python -m server.services.scheduler_service` (needs Postgres,
-Redis, and the standard API environment variables).
+## Develop
+
+```bash
+pip install -e ../api-sentinel-core           # or the pinned tag from pyproject.toml
+pip install --no-deps -e ".[test]"
+DEBUG=true pytest -q
+```
+
+`DEBUG=true` is required by tests: without it `sentinel_core.config` refuses to build settings
+(production validation).

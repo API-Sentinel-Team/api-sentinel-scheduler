@@ -1,3 +1,4 @@
-# Keep shell scripts executable on Linux/containers regardless of Windows checkout.
+* text=auto eol=lf
 *.sh text eol=lf
-infra/scripts/* text eol=lf
+*.png binary
+*.db binary

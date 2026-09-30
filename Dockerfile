@@ -13,12 +13,16 @@ WORKDIR /build
 # sentinel-core is a private repo: the token comes from a BuildKit secret and never lands in a layer.
 RUN --mount=type=secret,id=gh_token \
     git config --global url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf "https://github.com/" \
-    && pip install "sentinel-core @ git+https://github.com/API-Sentinel-Team/api-sentinel-core.git@v0.1.0" \
+    && pip install "sentinel-core @ git+https://github.com/API-Sentinel-Team/api-sentinel-core.git@v0.1.1" \
     ; rc=$?; git config --global --unset-all url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadof || true; exit $rc
 
 COPY pyproject.toml ./
 COPY sentinel_scheduler/ ./sentinel_scheduler/
+# Service-only runtime dependency (deliberately not part of sentinel-core):
+RUN pip install "APScheduler>=3.10,<4.0"
 RUN pip install --no-deps .
+# Fail the build, not the deployment, if a required import is missing.
+RUN python -c "from sentinel_scheduler.modules.scheduler.test_scheduler import APScheduler_AVAILABLE; assert APScheduler_AVAILABLE, 'APScheduler missing: schedules would never fire'; import sentinel_scheduler.services.scheduler_service"
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH"
